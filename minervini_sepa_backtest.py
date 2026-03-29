@@ -3,18 +3,25 @@
   MINERVINI SEPA STRATEGY — 15-YEAR PYTHON BACKTESTER
   Specific Entry Point Analysis (Stage 2 + VCP + RS Rating)
   Backtest Period: 2010 – 2024
+
+  v2 CHANGES vs original:
+    1. Profit target disabled (999%) — let winners run like Minervini does
+    2. Stop loss tightened to 7% — cut losers faster
+    3. Max hold days extended to 120 — give trends more room
+    4. Breakout volume multiplier raised to 2.0x — more selective entries
+    5. Expanded ticker universe (~95 stocks) — more setups in all markets
 ============================================================
 
-INSTALL DEPENDENCIES:
+INSTALL:
     pip install yfinance pandas numpy matplotlib tqdm
 
 RUN:
     python minervini_sepa_backtest.py
 
 OUTPUTS:
-    - Console: full trade log + summary statistics
-    - File:    minervini_results.png  (equity curve + charts)
-    - File:    minervini_trades.csv   (every trade, importable to Excel)
+    - Console: full stats + year-by-year + top trades
+    - minervini_results.png   (6-panel chart)
+    - minervini_trades.csv    (every trade, opens in Excel)
 
 ENTRY LOGIC (all must be TRUE on the same day):
     ── Trend Template ──────────────────────────────────────
@@ -22,23 +29,20 @@ ENTRY LOGIC (all must be TRUE on the same day):
     2. Close >= 30% above 52-week low
     3. Close within 25% of 52-week high
     4. MA200 is rising (higher than 20 trading days ago)
-
     ── Relative Strength ───────────────────────────────────
     5. Stock 12-month return > SPY 12-month return
-
     ── VCP (Volatility Contraction Pattern) ────────────────
     6. 10-day ATR / price < 3.5%   (tight, quiet base)
-    7. 10-day avg volume < 50-day avg volume (volume drying up)
-
+    7. 10-day avg volume < 50-day avg volume (drying up)
     ── Breakout ────────────────────────────────────────────
-    8. Today's close > highest close of the prior 20 sessions
-    9. Today's volume >= 1.5x the 50-day avg volume
+    8. Close > highest close of prior 20 sessions
+    9. Volume >= 2.0x the 50-day avg volume  ← raised from 1.5x
 
 EXIT LOGIC (first to trigger wins):
-    A. Hard Stop:      price falls 10% below entry
-    B. Profit Target:  price rises 25% above entry
-    C. Time Stop:      held 60+ calendar days with no trigger
-    D. Trend Break:    close falls below MA50 after being +5% profitable
+    A. Hard Stop:      -7% from entry              ← tightened from 10%
+    B. Profit Target:  disabled — let winners run  ← was 25%
+    C. Trailing Stop:  close < MA50 after +5% gain ← main exit for winners
+    D. Time Stop:      120 days max hold            ← extended from 60
 ============================================================
 """
 
@@ -61,61 +65,75 @@ except ImportError:
         return x
 
 # ══════════════════════════════════════════════════════════════════
-#  CONFIG  — adjust these to change the backtest
+#  CONFIG
 # ══════════════════════════════════════════════════════════════════
 CONFIG = {
     "start_date": "2010-01-01",
     "end_date":   "2024-12-31",
 
-    # ~80 historically strong growth stocks spanning 15 years
+    # Expanded universe — more tickers = more setups in every market
     "tickers": [
-        "AAPL", "MSFT", "NVDA", "AMD", "AVGO", "QCOM", "AMAT", "LRCX",
-        "GOOGL", "META", "AMZN", "NFLX", "CRM", "NOW", "ADBE", "INTU",
-        "CRWD", "PANW", "ZS", "NET", "DDOG", "SNOW", "OKTA", "TWLO",
-        "TTD", "BILL", "HUBS", "WDAY", "VEEV", "PAYC", "PCTY",
-        "LULU", "DECK", "CELH", "ELF", "MNST", "POOL", "RH", "MELI",
-        "LLY", "NVO", "ISRG", "REGN", "ALGN", "DXCM", "IDXX",
-        "MEDP", "GMED", "TMDX", "MRNA",
+        # Mega-cap tech & semis
+        "AAPL", "MSFT", "NVDA", "AMD", "AVGO", "QCOM", "AMAT", "LRCX", "KLAC", "MRVL",
+        # Internet / platforms
+        "GOOGL", "META", "AMZN", "NFLX", "UBER", "SNAP", "PINS",
+        # Enterprise software
+        "CRM", "NOW", "ADBE", "INTU", "WDAY", "VEEV", "PAYC", "PCTY", "COUP",
+        # Cybersecurity / cloud
+        "CRWD", "PANW", "ZS", "NET", "DDOG", "SNOW", "OKTA", "TWLO", "ESTC",
+        # Ad tech / marketplaces
+        "TTD", "BILL", "HUBS", "MELI", "SE", "SHOP",
+        # Consumer discretionary
+        "LULU", "DECK", "CELH", "ELF", "MNST", "POOL", "RH", "ONON", "CROX",
+        # Healthcare & biotech
+        "LLY", "NVO", "ISRG", "REGN", "ALGN", "DXCM", "IDXX", "ABMD",
+        "MEDP", "GMED", "TMDX", "MRNA", "PCVX", "RXRX",
+        # Industrials / specialty
         "ODFL", "BLDR", "MLI", "HWM", "FN", "BWXT", "AXON", "FICO",
-        "V", "MA", "PYPL", "COIN",
-        "CEIX", "AMR",
+        "CASY", "TREX", "WTTR", "KTOS", "RKLB",
+        # Financials / fintech
+        "V", "MA", "PYPL", "COIN", "AFRM", "SQ",
+        # Energy / materials
+        "CEIX", "AMR", "BTU", "TPVG",
+        # Additional growth names
+        "ENPH", "FSLR", "GNRC", "SAIA", "LSTR", "MELI", "INSP", "DRVN",
     ],
 
-    # Trend Template
+    # ── Trend Template ───────────────────────────────────────────
     "pct_above_52w_low":  0.30,
     "pct_below_52w_high": 0.25,
     "ma200_rising_days":  20,
 
-    # RS filter
+    # ── Relative Strength ────────────────────────────────────────
     "rs_vs_spy": True,
 
-    # VCP
+    # ── VCP ──────────────────────────────────────────────────────
     "vcp_atr_threshold":   0.035,
     "vcp_vol_contraction": True,
 
-    # Breakout
+    # ── Breakout ─────────────────────────────────────────────────
     "breakout_lookback":  20,
-    "breakout_vol_mult":  1.5,
+    "breakout_vol_mult":  2.0,    # ← raised from 1.5x (more selective)
 
-    # Exits
-    "stop_loss_pct":      0.10,
-    "profit_target_pct":  0.25,
-    "max_hold_days":      60,
-    "trend_break_exit":   True,
+    # ── Exits ────────────────────────────────────────────────────
+    "stop_loss_pct":      0.07,   # ← tightened from 10% to 7%
+    "profit_target_pct":  9.99,   # ← effectively disabled; trailing stop does the work
+    "max_hold_days":      120,    # ← extended from 60 to 120
+    "trend_break_exit":   True,   # close < MA50 after being +5% profitable
 
-    # Portfolio
+    # ── Portfolio ────────────────────────────────────────────────
     "max_positions":      6,
     "position_size_pct":  0.15,
     "starting_capital":   100_000,
 
-    # Output files
+    # ── Output ───────────────────────────────────────────────────
     "chart_file":  "minervini_results.png",
     "trades_file": "minervini_trades.csv",
 }
 
 
 # ══════════════════════════════════════════════════════════════════
-#  STEP 1 — DOWNLOAD DATA
+#  STEP 1 — DOWNLOAD
 # ══════════════════════════════════════════════════════════════════
 
 def download_all(cfg):
@@ -125,7 +143,7 @@ def download_all(cfg):
     ).strftime("%Y-%m-%d")
 
     print(f"\n{'═'*60}")
-    print(f"  MINERVINI SEPA  |  15-YEAR BACKTEST  |  2010–2024")
+    print(f"  MINERVINI SEPA  |  15-YEAR BACKTEST  |  2010–2024  v2")
     print(f"{'═'*60}")
     print(f"\n📥 Downloading {len(tickers)} tickers ({buffer_start} → {cfg['end_date']})...")
 
@@ -152,7 +170,7 @@ def download_all(cfg):
 
 
 # ══════════════════════════════════════════════════════════════════
-#  STEP 2 — BUILD INDICATORS
+#  STEP 2 — INDICATORS
 # ══════════════════════════════════════════════════════════════════
 
 def build_indicators(df, rising_days=20):
@@ -185,31 +203,31 @@ def build_indicators(df, rising_days=20):
 def is_entry(row, spy_ret12m, cfg):
     c = row["Close"]
 
-    # 1. Trend stack
+    # 1. Trend stack: price > MA50 > MA150 > MA200
     if not (c > row["ma50"] > row["ma150"] > row["ma200"]):
         return False
-    # 2. >= 30% above 52w low
+    # 2. >= 30% above 52-week low
     if c < row["low_52w"] * (1 + cfg["pct_above_52w_low"]):
         return False
-    # 3. Within 25% of 52w high
+    # 3. Within 25% of 52-week high
     if c < row["high_52w"] * (1 - cfg["pct_below_52w_high"]):
         return False
     # 4. MA200 rising
     if pd.isna(row["ma200_lag"]) or row["ma200"] <= row["ma200_lag"]:
         return False
-    # 5. RS vs SPY
+    # 5. Beats SPY 12m return
     if cfg["rs_vs_spy"] and (pd.isna(row["ret12m"]) or row["ret12m"] <= spy_ret12m):
         return False
     # 6. VCP tightness
     if (row["atr10"] / c) >= cfg["vcp_atr_threshold"]:
         return False
-    # 7. Volume drying up
+    # 7. Volume drying up in base
     if cfg["vcp_vol_contraction"] and row["vol10"] >= row["vol50"]:
         return False
-    # 8. Breakout above pivot
+    # 8. Breakout above 20-day pivot
     if pd.isna(row["pivot"]) or c <= row["pivot"]:
         return False
-    # 9. Volume surge
+    # 9. Volume surge on breakout (now 2x)
     if row["Volume"] < row["vol50"] * cfg["breakout_vol_mult"]:
         return False
 
@@ -223,14 +241,14 @@ def is_entry(row, spy_ret12m, cfg):
 def run_backtest(data, cfg):
     start_dt  = pd.Timestamp(cfg["start_date"])
     equity    = float(cfg["starting_capital"])
-    positions = {}       # ticker -> dict
+    positions = {}
     trades    = []
     eq_curve  = []
 
     spy_df  = build_indicators(data["SPY"], cfg["ma200_rising_days"])
     spy_ret = spy_df["ret12m"]
 
-    print("⚙️  Building indicators for all tickers...")
+    print("⚙️  Building indicators...")
     inds = {}
     for t, df in tqdm(data.items(), desc="Indicators", ncols=70):
         try:
@@ -256,14 +274,18 @@ def run_backtest(data, cfg):
             held  = (date - pos["entry_date"]).days
             reason = None
 
+            # A. Hard stop (7%)
             if ret <= -cfg["stop_loss_pct"]:
                 reason = "STOP"
+            # B. Profit target (effectively disabled at 999%)
             elif ret >= cfg["profit_target_pct"]:
                 reason = "TARGET"
+            # C. Time stop (120 days)
             elif held >= cfg["max_hold_days"]:
                 reason = "TIME"
+            # D. Trailing stop: close < MA50 after being +5% profitable
             elif cfg["trend_break_exit"] and ret >= 0.05 and price < float(row["ma50"]):
-                reason = "TREND_BREAK"
+                reason = "TRAIL_STOP"
 
             if reason:
                 pnl_d  = pos["shares"] * (price - pos["entry_price"])
@@ -319,7 +341,7 @@ def run_backtest(data, cfg):
                 open_val += float(idf.loc[date, "Close"]) * pos["shares"]
         eq_curve.append({"date": date, "equity": equity + open_val})
 
-    # Force-close remaining positions
+    # Force-close remaining at last price
     last = all_dates[-1]
     for ticker, pos in positions.items():
         idf   = inds.get(ticker)
@@ -341,9 +363,7 @@ def run_backtest(data, cfg):
             "year":        last.year,
         })
 
-    trades_df = pd.DataFrame(trades)
-    equity_df = pd.DataFrame(eq_curve).set_index("date")
-    return trades_df, equity_df, spy_df
+    return pd.DataFrame(trades), pd.DataFrame(eq_curve).set_index("date"), spy_df
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -400,24 +420,25 @@ def print_report(stats, trades_df, cfg):
     s   = "═" * 60
     sep = "─" * 60
     print(f"\n{s}")
-    print(f"  RESULTS  |  MINERVINI SEPA  |  2010–2024  (15 YEARS)")
+    print(f"  RESULTS  |  MINERVINI SEPA v2  |  2010–2024  (15 YEARS)")
     print(s)
+
     rows = [
-        ("Total Trades",          f"{stats['total_trades']:,}"),
-        ("Winners / Losers",      f"{stats['winners']:,} / {stats['losers']:,}"),
-        ("Win Rate",              f"{stats['win_rate']:.1f}%"),
-        ("",                      ""),
-        ("Total ROI",             f"+{stats['total_roi']:.1f}%"),
-        ("CAGR (Strategy)",       f"+{stats['cagr']:.1f}% / yr"),
-        ("CAGR (SPY B&H)",        f"+{stats['spy_cagr']:.1f}% / yr"),
-        ("Final Equity",          f"${stats['final_equity']:,.0f}"),
-        ("",                      ""),
-        ("Avg Days Held",         f"{stats['avg_days']:.1f} days"),
-        ("Avg Winner",            f"+{stats['avg_win']:.1f}%"),
-        ("Avg Loser",             f"{stats['avg_loss']:.1f}%"),
-        ("Profit Factor",         f"{stats['profit_factor']:.2f}x"),
-        ("Max Drawdown",          f"{stats['max_drawdown']:.1f}%"),
-        ("Sharpe Ratio (ann.)",   f"{stats['sharpe']:.2f}"),
+        ("Total Trades",         f"{stats['total_trades']:,}"),
+        ("Winners / Losers",     f"{stats['winners']:,} / {stats['losers']:,}"),
+        ("Win Rate",             f"{stats['win_rate']:.1f}%"),
+        ("",                     ""),
+        ("Total ROI",            f"+{stats['total_roi']:.1f}%"),
+        ("CAGR (Strategy)",      f"+{stats['cagr']:.1f}% / yr"),
+        ("CAGR (SPY B&H)",       f"+{stats['spy_cagr']:.1f}% / yr"),
+        ("Final Equity",         f"${stats['final_equity']:,.0f}"),
+        ("",                     ""),
+        ("Avg Days Held",        f"{stats['avg_days']:.1f} days"),
+        ("Avg Winner",           f"+{stats['avg_win']:.1f}%"),
+        ("Avg Loser",            f"{stats['avg_loss']:.1f}%"),
+        ("Profit Factor",        f"{stats['profit_factor']:.2f}x"),
+        ("Max Drawdown",         f"{stats['max_drawdown']:.1f}%"),
+        ("Sharpe Ratio (ann.)",  f"{stats['sharpe']:.2f}"),
     ]
     for label, value in rows:
         if not label:
@@ -425,14 +446,12 @@ def print_report(stats, trades_df, cfg):
         else:
             print(f"  {label:<28} {value:>14}")
 
-    # Exit breakdown
     print(f"\n{sep}")
     print("  EXIT REASONS")
     print(sep)
     for reason, cnt in trades_df["exit_reason"].value_counts().items():
-        print(f"  {reason:<20} {cnt:>6,}  ({cnt/len(trades_df)*100:.1f}%)")
+        print(f"  {reason:<22} {cnt:>5,}  ({cnt/len(trades_df)*100:.1f}%)")
 
-    # Year-by-year
     print(f"\n{sep}")
     print(f"  {'Year':<8} {'Trades':>7} {'Win%':>7} {'AvgP&L':>9} {'Net $':>12}")
     print(sep)
@@ -440,7 +459,6 @@ def print_report(stats, trades_df, cfg):
         print(f"  {yr:<8} {len(g):>7,} {g['win'].mean()*100:>6.1f}% "
               f"{g['pnl_pct'].mean():>+8.1f}% {g['pnl_dollar'].sum():>+12,.0f}")
 
-    # Top 10
     print(f"\n{sep}")
     print("  TOP 10 WINNING TRADES")
     print(sep)
@@ -448,6 +466,21 @@ def print_report(stats, trades_df, cfg):
         ["ticker", "entry_date", "exit_date", "days_held", "pnl_pct", "exit_reason"]
     ]
     print(top.to_string(index=False))
+    print(f"\n{s}\n")
+
+    # v2 change summary
+    print("  v2 PARAMETER CHANGES vs ORIGINAL")
+    print(sep)
+    changes = [
+        ("Stop Loss",          "10%  →  7%   (cut losers faster)"),
+        ("Profit Target",      "25%  →  OFF  (let winners run)"),
+        ("Exit Method",        "Fixed target  →  MA50 trailing stop"),
+        ("Max Hold",           "60d  →  120d  (more room for trends)"),
+        ("Breakout Volume",    "1.5x →  2.0x  (more selective entries)"),
+        ("Ticker Universe",    "65   →  ~95   (more setups)"),
+    ]
+    for label, value in changes:
+        print(f"  {label:<22}  {value}")
     print(f"\n{s}\n")
 
 
@@ -468,7 +501,6 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     ax1 = fig.add_subplot(gs[0, :])
     ax1.set_facecolor(SURF)
     eq  = equity_df["equity"]
-
     spy_s = spy_df[spy_df.index >= pd.Timestamp(cfg["start_date"])]["Close"]
     spy_s = spy_s / spy_s.iloc[0] * cfg["starting_capital"]
 
@@ -477,12 +509,12 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     ax1.fill_between(eq.index, cfg["starting_capital"], eq,
                      where=(eq < cfg["starting_capital"]), alpha=0.15, color=RED)
     ax1.plot(eq.index, eq, color=ACC, lw=1.8,
-             label=f"SEPA Strategy  CAGR +{stats['cagr']:.1f}%/yr  (+{stats['total_roi']:.0f}% total)")
+             label=f"SEPA v2  CAGR +{stats['cagr']:.1f}%/yr  (total +{stats['total_roi']:.0f}%)")
     ax1.plot(spy_s.index, spy_s, color=MUT, lw=1.2, ls="--",
-             label=f"Buy & Hold SPY  CAGR +{stats['spy_cagr']:.1f}%/yr  (+{stats['spy_roi']:.0f}% total)")
+             label=f"Buy & Hold SPY  CAGR +{stats['spy_cagr']:.1f}%/yr  (total +{stats['spy_roi']:.0f}%)")
     ax1.axhline(cfg["starting_capital"], color=MUT, lw=0.5, ls=":")
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"${x:,.0f}"))
-    ax1.set_title("EQUITY CURVE — MINERVINI SEPA vs. BUY & HOLD SPY  (2010–2024)",
+    ax1.set_title("EQUITY CURVE — MINERVINI SEPA v2 vs. BUY & HOLD SPY  (2010–2024)",
                   color="white", fontsize=11, fontweight="bold", pad=10)
     ax1.legend(fontsize=9, loc="upper left")
     ax1.tick_params(colors=MUT, labelsize=8)
@@ -512,17 +544,17 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     # ── P&L distribution ─────────────────────────────────────────
     ax4 = fig.add_subplot(gs[1, 2])
     ax4.set_facecolor(SURF)
-    ax4.hist(trades_df[trades_df["win"]]["pnl_pct"],  bins=20, color=ACC, alpha=0.7,
-             label="Winners", edgecolor=SURF)
-    ax4.hist(trades_df[~trades_df["win"]]["pnl_pct"], bins=15, color=RED, alpha=0.7,
-             label="Losers",  edgecolor=SURF)
+    ax4.hist(trades_df[trades_df["win"]]["pnl_pct"],  bins=20, color=ACC,
+             alpha=0.7, label="Winners", edgecolor=SURF)
+    ax4.hist(trades_df[~trades_df["win"]]["pnl_pct"], bins=15, color=RED,
+             alpha=0.7, label="Losers",  edgecolor=SURF)
     ax4.axvline(0, color=MUT, lw=0.8)
     ax4.set_title("P&L DISTRIBUTION (%)", color=MUT, fontsize=9, fontweight="bold")
     ax4.legend(fontsize=8)
     ax4.tick_params(colors=MUT, labelsize=8)
     for sp in ax4.spines.values(): sp.set_color("#1e2430")
 
-    # ── Year-by-year win rate bars ────────────────────────────────
+    # ── Year-by-year win rate ─────────────────────────────────────
     ax5 = fig.add_subplot(gs[2, :2])
     ax5.set_facecolor(SURF)
     yr_grp = trades_df.groupby("year")
@@ -544,30 +576,30 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     ax6 = fig.add_subplot(gs[2, 2])
     ax6.set_facecolor(SURF)
     ax6.axis("off")
-    rows = [
-        ("TOTAL TRADES",    f"{stats['total_trades']:,}",          "white"),
-        ("WIN RATE",        f"{stats['win_rate']:.1f}%",           ACC),
-        ("TOTAL ROI",       f"+{stats['total_roi']:.1f}%",         ACC),
-        ("CAGR STRATEGY",   f"+{stats['cagr']:.1f}% / yr",         ACC),
-        ("CAGR SPY",        f"+{stats['spy_cagr']:.1f}% / yr",     MUT),
-        ("AVG DAYS HELD",   f"{stats['avg_days']:.1f}",            GOLD),
-        ("AVG WINNER",      f"+{stats['avg_win']:.1f}%",           ACC),
-        ("AVG LOSER",       f"{stats['avg_loss']:.1f}%",           RED),
-        ("PROFIT FACTOR",   f"{stats['profit_factor']:.2f}x",      GOLD),
-        ("MAX DRAWDOWN",    f"{stats['max_drawdown']:.1f}%",       RED),
-        ("SHARPE RATIO",    f"{stats['sharpe']:.2f}",              GOLD),
-        ("FINAL EQUITY",    f"${stats['final_equity']:,.0f}",      ACC),
+    stat_rows = [
+        ("TOTAL TRADES",   f"{stats['total_trades']:,}",          "white"),
+        ("WIN RATE",       f"{stats['win_rate']:.1f}%",            ACC),
+        ("TOTAL ROI",      f"+{stats['total_roi']:.1f}%",          ACC),
+        ("CAGR STRATEGY",  f"+{stats['cagr']:.1f}% / yr",          ACC),
+        ("CAGR SPY",       f"+{stats['spy_cagr']:.1f}% / yr",      MUT),
+        ("AVG DAYS HELD",  f"{stats['avg_days']:.1f}",             GOLD),
+        ("AVG WINNER",     f"+{stats['avg_win']:.1f}%",            ACC),
+        ("AVG LOSER",      f"{stats['avg_loss']:.1f}%",            RED),
+        ("PROFIT FACTOR",  f"{stats['profit_factor']:.2f}x",       GOLD),
+        ("MAX DRAWDOWN",   f"{stats['max_drawdown']:.1f}%",        RED),
+        ("SHARPE RATIO",   f"{stats['sharpe']:.2f}",               GOLD),
+        ("FINAL EQUITY",   f"${stats['final_equity']:,.0f}",       ACC),
     ]
     ax6.set_title("SUMMARY STATISTICS", color=MUT, fontsize=9, fontweight="bold")
-    for i, (label, value, color) in enumerate(rows):
+    for i, (label, value, color) in enumerate(stat_rows):
         y = 1 - i * 0.082
-        ax6.text(0.02, y, label, transform=ax6.transAxes, color=MUT,    fontsize=8, va="top")
-        ax6.text(0.98, y, value, transform=ax6.transAxes, color=color,  fontsize=8,
+        ax6.text(0.02, y, label, transform=ax6.transAxes, color=MUT,   fontsize=8, va="top")
+        ax6.text(0.98, y, value, transform=ax6.transAxes, color=color, fontsize=8,
                  va="top", ha="right", fontweight="bold")
 
     plt.suptitle(
-        "MINERVINI SEPA STRATEGY — 15-YEAR BACKTEST (2010–2024)",
-        color="white", fontsize=14, fontweight="bold", y=0.98,
+        "MINERVINI SEPA v2 — 15-YEAR BACKTEST (2010–2024)  |  Trailing Stop + Wider Universe",
+        color="white", fontsize=13, fontweight="bold", y=0.98,
     )
     plt.savefig(cfg["chart_file"], dpi=150, bbox_inches="tight", facecolor=BG)
     print(f"📊 Chart saved → {cfg['chart_file']}")
