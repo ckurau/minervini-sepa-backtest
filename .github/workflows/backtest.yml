@@ -1,13 +1,14 @@
 name: Minervini SEPA Backtest
 
 on:
-  workflow_dispatch:       # run manually with a button click
+  workflow_dispatch:        # run manually with a button click
   schedule:
-    - cron: '0 16 * * 1-5' # auto-run Mon–Fri at 4pm UTC (optional)
+    - cron: '0 16 * * 1-5' # optional: auto-run Mon–Fri at 4pm UTC
 
 jobs:
   backtest:
     runs-on: ubuntu-latest
+    timeout-minutes: 360    # 6 hours — needed for full S&P 1500 download + simulation
 
     steps:
       - name: Checkout code
@@ -20,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yfinance pandas numpy matplotlib tqdm
+          pip install yfinance pandas numpy matplotlib tqdm lxml html5lib
 
       - name: Run backtest
         run: python minervini_sepa_backtest.py
@@ -32,3 +33,4 @@ jobs:
           path: |
             minervini_results.png
             minervini_trades.csv
+          retention-days: 30
