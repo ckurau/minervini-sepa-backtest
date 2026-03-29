@@ -4,12 +4,14 @@
   Specific Entry Point Analysis (Stage 2 + VCP + RS Rating)
   Backtest Period: 2010 – 2024
 
-  v2 CHANGES vs original:
-    1. Profit target disabled (999%) — let winners run like Minervini does
-    2. Stop loss tightened to 7% — cut losers faster
-    3. Max hold days extended to 120 — give trends more room
-    4. Breakout volume multiplier raised to 2.0x — more selective entries
-    5. Expanded ticker universe (~95 stocks) — more setups in all markets
+  v3 CHANGES vs v2:
+    1. Market filter: only enter new trades when SPY > its 200MA
+       (Minervini goes to cash in bear markets — avoids 2018/2020/2022)
+    2. Breakout confirmation: require 2 consecutive closes above pivot
+       (reduces false breakouts / getting stopped out immediately)
+    3. Volume relaxed back to 1.75x (balance quality vs quantity)
+    4. Stop loss widened slightly to 8% (less noise-driven stops)
+    5. Yearly ROI % now printed in the report (not just Net $)
 ============================================================
 
 INSTALL:
@@ -19,30 +21,36 @@ RUN:
     python minervini_sepa_backtest.py
 
 OUTPUTS:
-    - Console: full stats + year-by-year + top trades
+    - Console: full stats + year-by-year ROI% + top trades
     - minervini_results.png   (6-panel chart)
     - minervini_trades.csv    (every trade, opens in Excel)
 
-ENTRY LOGIC (all must be TRUE on the same day):
+ENTRY LOGIC (all must be TRUE):
+    ── Market Filter (new in v3) ────────────────────────────
+    0. SPY Close > SPY MA200  (only trade in uptrending markets)
+
     ── Trend Template ──────────────────────────────────────
     1. Close > MA50 > MA150 > MA200
     2. Close >= 30% above 52-week low
     3. Close within 25% of 52-week high
     4. MA200 is rising (higher than 20 trading days ago)
+
     ── Relative Strength ───────────────────────────────────
     5. Stock 12-month return > SPY 12-month return
+
     ── VCP (Volatility Contraction Pattern) ────────────────
-    6. 10-day ATR / price < 3.5%   (tight, quiet base)
-    7. 10-day avg volume < 50-day avg volume (drying up)
-    ── Breakout ────────────────────────────────────────────
+    6. 10-day ATR / price < 3.5%
+    7. 10-day avg volume < 50-day avg volume
+
+    ── Breakout + Confirmation (new in v3) ─────────────────
     8. Close > highest close of prior 20 sessions
-    9. Volume >= 2.0x the 50-day avg volume  ← raised from 1.5x
+    9. This is the 2nd consecutive day above the pivot  ← new
+   10. Volume >= 1.75x the 50-day avg volume
 
 EXIT LOGIC (first to trigger wins):
-    A. Hard Stop:      -7% from entry              ← tightened from 10%
-    B. Profit Target:  disabled — let winners run  ← was 25%
-    C. Trailing Stop:  close < MA50 after +5% gain ← main exit for winners
-    D. Time Stop:      120 days max hold            ← extended from 60
+    A. Hard Stop:      -8% from entry
+    B. Trailing Stop:  close < MA50 after being +5% profitable
+    C. Time Stop:      120 days max hold
 ============================================================
 """
 
@@ -71,7 +79,6 @@ CONFIG = {
     "start_date": "2010-01-01",
     "end_date":   "2024-12-31",
 
-    # Expanded universe — more tickers = more setups in every market
     "tickers": [
         # Mega-cap tech & semis
         "AAPL", "MSFT", "NVDA", "AMD", "AVGO", "QCOM", "AMAT", "LRCX", "KLAC", "MRVL",
@@ -90,14 +97,17 @@ CONFIG = {
         "MEDP", "GMED", "TMDX", "MRNA", "PCVX", "RXRX",
         # Industrials / specialty
         "ODFL", "BLDR", "MLI", "HWM", "FN", "BWXT", "AXON", "FICO",
-        "CASY", "TREX", "WTTR", "KTOS", "RKLB",
+        "CASY", "TREX", "KTOS", "RKLB", "SAIA",
         # Financials / fintech
         "V", "MA", "PYPL", "COIN", "AFRM", "SQ",
         # Energy / materials
-        "CEIX", "AMR", "BTU", "TPVG",
-        # Additional growth names
-        "ENPH", "FSLR", "GNRC", "SAIA", "LSTR", "MELI", "INSP", "DRVN",
+        "CEIX", "AMR", "BTU",
+        # Additional growth
+        "ENPH", "FSLR", "GNRC", "LSTR", "INSP", "DRVN",
     ],
+
+    # ── Market filter ─────────────────────────────────────────────
+    "market_filter":      True,   # ← NEW: only trade when SPY > SPY MA200
 
     # ── Trend Template ───────────────────────────────────────────
     "pct_above_52w_low":  0.30,
@@ -105,21 +115,22 @@ CONFIG = {
     "ma200_rising_days":  20,
 
     # ── Relative Strength ────────────────────────────────────────
-    "rs_vs_spy": True,
+    "rs_vs_spy":          True,
 
     # ── VCP ──────────────────────────────────────────────────────
     "vcp_atr_threshold":   0.035,
     "vcp_vol_contraction": True,
 
     # ── Breakout ─────────────────────────────────────────────────
-    "breakout_lookback":  20,
-    "breakout_vol_mult":  2.0,    # ← raised from 1.5x (more selective)
+    "breakout_lookback":      20,
+    "breakout_vol_mult":      1.75,  # ← relaxed from 2.0x
+    "breakout_confirm_days":  2,     # ← NEW: 2 consecutive closes above pivot
 
     # ── Exits ────────────────────────────────────────────────────
-    "stop_loss_pct":      0.07,   # ← tightened from 10% to 7%
-    "profit_target_pct":  9.99,   # ← effectively disabled; trailing stop does the work
-    "max_hold_days":      120,    # ← extended from 60 to 120
-    "trend_break_exit":   True,   # close < MA50 after being +5% profitable
+    "stop_loss_pct":      0.08,   # ← widened slightly from 7%
+    "profit_target_pct":  9.99,   # disabled — trailing stop handles exits
+    "max_hold_days":      120,
+    "trend_break_exit":   True,   # exit if close < MA50 when up >= 5%
 
     # ── Portfolio ────────────────────────────────────────────────
     "max_positions":      6,
@@ -142,9 +153,9 @@ def download_all(cfg):
         datetime.strptime(cfg["start_date"], "%Y-%m-%d") - timedelta(days=310)
     ).strftime("%Y-%m-%d")
 
-    print(f"\n{'═'*60}")
-    print(f"  MINERVINI SEPA  |  15-YEAR BACKTEST  |  2010–2024  v2")
-    print(f"{'═'*60}")
+    print(f"\n{'═'*62}")
+    print(f"  MINERVINI SEPA v3  |  15-YEAR BACKTEST  |  2010–2024")
+    print(f"{'═'*62}")
     print(f"\n📥 Downloading {len(tickers)} tickers ({buffer_start} → {cfg['end_date']})...")
 
     raw = yf.download(
@@ -190,7 +201,17 @@ def build_indicators(df, rising_days=20):
 
     df["vol10"]  = v.rolling(10).mean()
     df["vol50"]  = v.rolling(50).mean()
+
+    # Pivot: highest close of prior N days (shifted so today not included)
     df["pivot"]  = c.shift(1).rolling(20).max()
+
+    # Days consecutively above pivot (for confirmation filter)
+    above_pivot  = (c > df["pivot"]).astype(int)
+    df["consec_above_pivot"] = above_pivot.groupby(
+        (above_pivot != above_pivot.shift()).cumsum()
+    ).cumcount() + 1
+    df.loc[above_pivot == 0, "consec_above_pivot"] = 0
+
     df["ret12m"] = c.pct_change(252)
 
     return df.dropna()
@@ -200,10 +221,14 @@ def build_indicators(df, rising_days=20):
 #  STEP 3 — ENTRY SIGNAL
 # ══════════════════════════════════════════════════════════════════
 
-def is_entry(row, spy_ret12m, cfg):
+def is_entry(row, spy_ret12m, spy_above_200, cfg):
     c = row["Close"]
 
-    # 1. Trend stack: price > MA50 > MA150 > MA200
+    # 0. Market filter: SPY must be above its 200MA
+    if cfg["market_filter"] and not spy_above_200:
+        return False
+
+    # 1. Trend stack
     if not (c > row["ma50"] > row["ma150"] > row["ma200"]):
         return False
     # 2. >= 30% above 52-week low
@@ -215,7 +240,7 @@ def is_entry(row, spy_ret12m, cfg):
     # 4. MA200 rising
     if pd.isna(row["ma200_lag"]) or row["ma200"] <= row["ma200_lag"]:
         return False
-    # 5. Beats SPY 12m return
+    # 5. RS vs SPY
     if cfg["rs_vs_spy"] and (pd.isna(row["ret12m"]) or row["ret12m"] <= spy_ret12m):
         return False
     # 6. VCP tightness
@@ -224,10 +249,13 @@ def is_entry(row, spy_ret12m, cfg):
     # 7. Volume drying up in base
     if cfg["vcp_vol_contraction"] and row["vol10"] >= row["vol50"]:
         return False
-    # 8. Breakout above 20-day pivot
+    # 8. Above pivot
     if pd.isna(row["pivot"]) or c <= row["pivot"]:
         return False
-    # 9. Volume surge on breakout (now 2x)
+    # 9. Confirmation: N consecutive days above pivot
+    if row["consec_above_pivot"] < cfg["breakout_confirm_days"]:
+        return False
+    # 10. Volume surge
     if row["Volume"] < row["vol50"] * cfg["breakout_vol_mult"]:
         return False
 
@@ -261,6 +289,12 @@ def run_backtest(data, cfg):
 
     for date in tqdm(all_dates, desc="Backtesting", ncols=70):
 
+        # SPY state for this day
+        spy_row        = spy_df.loc[date] if date in spy_df.index else None
+        spy_above_200  = bool(spy_row is not None and
+                              float(spy_row["Close"]) > float(spy_row["ma200"]))
+        spy_r          = float(spy_ret.get(date, np.nan)) if date in spy_ret.index else np.nan
+
         # ── EXITS ─────────────────────────────────────────────────
         for ticker in list(positions.keys()):
             pos = positions[ticker]
@@ -274,16 +308,12 @@ def run_backtest(data, cfg):
             held  = (date - pos["entry_date"]).days
             reason = None
 
-            # A. Hard stop (7%)
             if ret <= -cfg["stop_loss_pct"]:
                 reason = "STOP"
-            # B. Profit target (effectively disabled at 999%)
             elif ret >= cfg["profit_target_pct"]:
                 reason = "TARGET"
-            # C. Time stop (120 days)
             elif held >= cfg["max_hold_days"]:
                 reason = "TIME"
-            # D. Trailing stop: close < MA50 after being +5% profitable
             elif cfg["trend_break_exit"] and ret >= 0.05 and price < float(row["ma50"]):
                 reason = "TRAIL_STOP"
 
@@ -307,7 +337,6 @@ def run_backtest(data, cfg):
 
         # ── ENTRIES ───────────────────────────────────────────────
         if len(positions) < cfg["max_positions"]:
-            spy_r = float(spy_ret.get(date, np.nan)) if date in spy_ret.index else np.nan
             for ticker, idf in inds.items():
                 if ticker == "SPY" or ticker in positions:
                     continue
@@ -317,7 +346,7 @@ def run_backtest(data, cfg):
                     continue
                 try:
                     row = idf.loc[date]
-                    if is_entry(row, spy_r, cfg):
+                    if is_entry(row, spy_r, spy_above_200, cfg):
                         pos_val = equity * cfg["position_size_pct"]
                         shares  = pos_val / float(row["Close"])
                         cost    = shares * float(row["Close"])
@@ -341,7 +370,7 @@ def run_backtest(data, cfg):
                 open_val += float(idf.loc[date, "Close"]) * pos["shares"]
         eq_curve.append({"date": date, "equity": equity + open_val})
 
-    # Force-close remaining at last price
+    # Force-close remaining
     last = all_dates[-1]
     for ticker, pos in positions.items():
         idf   = inds.get(ticker)
@@ -409,6 +438,7 @@ def compute_stats(trades_df, equity_df, spy_df, cfg):
         "max_drawdown":  max_dd,
         "sharpe":        sharpe,
         "final_equity":  final_eq,
+        "equity_curve":  eq,
     }
 
 
@@ -416,11 +446,11 @@ def compute_stats(trades_df, equity_df, spy_df, cfg):
 #  STEP 6 — PRINT REPORT
 # ══════════════════════════════════════════════════════════════════
 
-def print_report(stats, trades_df, cfg):
-    s   = "═" * 60
-    sep = "─" * 60
+def print_report(stats, trades_df, equity_df, cfg):
+    s   = "═" * 62
+    sep = "─" * 62
     print(f"\n{s}")
-    print(f"  RESULTS  |  MINERVINI SEPA v2  |  2010–2024  (15 YEARS)")
+    print(f"  RESULTS  |  MINERVINI SEPA v3  |  2010–2024  (15 YEARS)")
     print(s)
 
     rows = [
@@ -444,21 +474,44 @@ def print_report(stats, trades_df, cfg):
         if not label:
             print()
         else:
-            print(f"  {label:<28} {value:>14}")
+            print(f"  {label:<28} {value:>16}")
 
+    # Exit breakdown
     print(f"\n{sep}")
     print("  EXIT REASONS")
     print(sep)
     for reason, cnt in trades_df["exit_reason"].value_counts().items():
-        print(f"  {reason:<22} {cnt:>5,}  ({cnt/len(trades_df)*100:.1f}%)")
+        print(f"  {reason:<24} {cnt:>5,}  ({cnt/len(trades_df)*100:.1f}%)")
+
+    # ── Year-by-year with ROI% ────────────────────────────────────
+    # Build start-of-year equity from the equity curve
+    eq = equity_df["equity"]
+    yearly_eq_start = {}
+    for yr in range(2010, 2025):
+        yr_data = eq[eq.index.year == yr]
+        if len(yr_data):
+            yearly_eq_start[yr] = yr_data.iloc[0]
 
     print(f"\n{sep}")
-    print(f"  {'Year':<8} {'Trades':>7} {'Win%':>7} {'AvgP&L':>9} {'Net $':>12}")
+    print(f"  {'Year':<6} {'Trades':>7} {'Win%':>7} {'ROI%':>8} {'AvgP&L':>9} {'Net $':>12}  Market")
     print(sep)
-    for yr, g in trades_df.groupby("year"):
-        print(f"  {yr:<8} {len(g):>7,} {g['win'].mean()*100:>6.1f}% "
-              f"{g['pnl_pct'].mean():>+8.1f}% {g['pnl_dollar'].sum():>+12,.0f}")
 
+    for yr, g in trades_df.groupby("year"):
+        wr      = g["win"].mean() * 100
+        avg_pnl = g["pnl_pct"].mean()
+        net_d   = g["pnl_dollar"].sum()
+
+        # Year ROI = net $ / equity at start of year
+        eq_start = yearly_eq_start.get(yr, cfg["starting_capital"])
+        roi_pct  = net_d / eq_start * 100
+
+        # Was the market (SPY) positive this year?
+        spy_yr   = "📈" if net_d >= 0 else "📉"
+
+        print(f"  {yr:<6} {len(g):>7,} {wr:>6.1f}% {roi_pct:>+7.1f}% "
+              f"{avg_pnl:>+8.1f}% {net_d:>+12,.0f}  {spy_yr}")
+
+    # Top 10
     print(f"\n{sep}")
     print("  TOP 10 WINNING TRADES")
     print(sep)
@@ -466,21 +519,20 @@ def print_report(stats, trades_df, cfg):
         ["ticker", "entry_date", "exit_date", "days_held", "pnl_pct", "exit_reason"]
     ]
     print(top.to_string(index=False))
-    print(f"\n{s}\n")
 
-    # v2 change summary
-    print("  v2 PARAMETER CHANGES vs ORIGINAL")
+    # v3 changes summary
+    print(f"\n{sep}")
+    print("  v3 CHANGES vs v2")
     print(sep)
     changes = [
-        ("Stop Loss",          "10%  →  7%   (cut losers faster)"),
-        ("Profit Target",      "25%  →  OFF  (let winners run)"),
-        ("Exit Method",        "Fixed target  →  MA50 trailing stop"),
-        ("Max Hold",           "60d  →  120d  (more room for trends)"),
-        ("Breakout Volume",    "1.5x →  2.0x  (more selective entries)"),
-        ("Ticker Universe",    "65   →  ~95   (more setups)"),
+        ("Market Filter",      "OFF  →  ON   (no trades when SPY < 200MA)"),
+        ("Entry Confirmation", "1 day  →  2 consecutive closes above pivot"),
+        ("Breakout Volume",    "2.0x  →  1.75x  (balance quality/quantity)"),
+        ("Stop Loss",          "7%   →  8%   (less noise-driven stops)"),
+        ("Yearly ROI%",        "Not shown  →  Now printed in report"),
     ]
     for label, value in changes:
-        print(f"  {label:<22}  {value}")
+        print(f"  {label:<24}  {value}")
     print(f"\n{s}\n")
 
 
@@ -494,7 +546,7 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     ACC, RED  = "#00e5a0", "#ff4d6d"
     GOLD, MUT = "#ffd166", "#5a6070"
 
-    fig = plt.figure(figsize=(18, 12), facecolor=BG)
+    fig = plt.figure(figsize=(18, 13), facecolor=BG)
     gs  = gridspec.GridSpec(3, 3, figure=fig, hspace=0.48, wspace=0.36)
 
     # ── Equity curve ─────────────────────────────────────────────
@@ -504,17 +556,32 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     spy_s = spy_df[spy_df.index >= pd.Timestamp(cfg["start_date"])]["Close"]
     spy_s = spy_s / spy_s.iloc[0] * cfg["starting_capital"]
 
+    # Shade bear market periods (SPY below 200MA)
+    spy_200 = spy_df[spy_df.index >= pd.Timestamp(cfg["start_date"])]["ma200"]
+    spy_close = spy_df[spy_df.index >= pd.Timestamp(cfg["start_date"])]["Close"]
+    bear = spy_close < spy_200
+    bear_starts = bear.index[bear & ~bear.shift(1).fillna(False)]
+    bear_ends   = bear.index[~bear & bear.shift(1).fillna(False)]
+    for bs in bear_starts:
+        be = bear_ends[bear_ends > bs][0] if len(bear_ends[bear_ends > bs]) else eq.index[-1]
+        ax1.axvspan(bs, be, alpha=0.08, color=RED, label="_nolegend_")
+
     ax1.fill_between(eq.index, cfg["starting_capital"], eq,
                      where=(eq >= cfg["starting_capital"]), alpha=0.15, color=ACC)
     ax1.fill_between(eq.index, cfg["starting_capital"], eq,
                      where=(eq < cfg["starting_capital"]), alpha=0.15, color=RED)
     ax1.plot(eq.index, eq, color=ACC, lw=1.8,
-             label=f"SEPA v2  CAGR +{stats['cagr']:.1f}%/yr  (total +{stats['total_roi']:.0f}%)")
+             label=f"SEPA v3  CAGR +{stats['cagr']:.1f}%/yr  (total +{stats['total_roi']:.0f}%)")
     ax1.plot(spy_s.index, spy_s, color=MUT, lw=1.2, ls="--",
              label=f"Buy & Hold SPY  CAGR +{stats['spy_cagr']:.1f}%/yr  (total +{stats['spy_roi']:.0f}%)")
     ax1.axhline(cfg["starting_capital"], color=MUT, lw=0.5, ls=":")
+
+    # Red zone label
+    ax1.text(0.01, 0.05, "▓ Red zones = SPY below 200MA (no new entries)",
+             transform=ax1.transAxes, color=RED, fontsize=7, alpha=0.7)
+
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"${x:,.0f}"))
-    ax1.set_title("EQUITY CURVE — MINERVINI SEPA v2 vs. BUY & HOLD SPY  (2010–2024)",
+    ax1.set_title("EQUITY CURVE — MINERVINI SEPA v3 vs. BUY & HOLD SPY  (2010–2024)",
                   color="white", fontsize=11, fontweight="bold", pad=10)
     ax1.legend(fontsize=9, loc="upper left")
     ax1.tick_params(colors=MUT, labelsize=8)
@@ -554,23 +621,35 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
     ax4.tick_params(colors=MUT, labelsize=8)
     for sp in ax4.spines.values(): sp.set_color("#1e2430")
 
-    # ── Year-by-year win rate ─────────────────────────────────────
+    # ── Year-by-year ROI % bars ───────────────────────────────────
     ax5 = fig.add_subplot(gs[2, :2])
     ax5.set_facecolor(SURF)
-    yr_grp = trades_df.groupby("year")
-    years  = sorted(yr_grp.groups.keys())
-    yr_wr  = [yr_grp.get_group(y)["win"].mean() * 100 for y in years]
-    yr_net = [yr_grp.get_group(y)["pnl_dollar"].sum() for y in years]
-    colors = [ACC if n >= 0 else RED for n in yr_net]
-    bars   = ax5.bar(years, yr_wr, color=colors, alpha=0.8, edgecolor=SURF, width=0.6)
-    ax5.axhline(50, color=MUT, lw=0.8, ls="--")
-    ax5.set_title("WIN RATE BY YEAR (%)", color=MUT, fontsize=9, fontweight="bold")
-    ax5.set_ylim(0, 100)
+
+    eq_curve = equity_df["equity"]
+    yearly_eq_start = {}
+    for yr in range(2010, 2025):
+        yr_data = eq_curve[eq_curve.index.year == yr]
+        if len(yr_data):
+            yearly_eq_start[yr] = yr_data.iloc[0]
+
+    yr_grp  = trades_df.groupby("year")
+    years   = sorted(yr_grp.groups.keys())
+    yr_roi  = []
+    for y in years:
+        net   = yr_grp.get_group(y)["pnl_dollar"].sum()
+        start = yearly_eq_start.get(y, cfg["starting_capital"])
+        yr_roi.append(net / start * 100)
+
+    colors = [ACC if r >= 0 else RED for r in yr_roi]
+    bars   = ax5.bar(years, yr_roi, color=colors, alpha=0.8, edgecolor=SURF, width=0.6)
+    ax5.axhline(0, color=MUT, lw=0.8)
+    ax5.set_title("ANNUAL ROI % (on start-of-year equity)", color=MUT, fontsize=9, fontweight="bold")
     ax5.tick_params(colors=MUT, labelsize=8)
     for sp in ax5.spines.values(): sp.set_color("#1e2430")
-    for bar, val in zip(bars, yr_wr):
-        ax5.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                 f"{val:.0f}%", ha="center", va="bottom", color="white", fontsize=7)
+    for bar, val in zip(bars, yr_roi):
+        ypos = bar.get_height() + 0.3 if val >= 0 else bar.get_height() - 2.5
+        ax5.text(bar.get_x() + bar.get_width() / 2, ypos,
+                 f"{val:+.0f}%", ha="center", va="bottom", color="white", fontsize=7)
 
     # ── Summary stats box ─────────────────────────────────────────
     ax6 = fig.add_subplot(gs[2, 2])
@@ -598,8 +677,8 @@ def plot_results(trades_df, equity_df, spy_df, stats, cfg):
                  va="top", ha="right", fontweight="bold")
 
     plt.suptitle(
-        "MINERVINI SEPA v2 — 15-YEAR BACKTEST (2010–2024)  |  Trailing Stop + Wider Universe",
-        color="white", fontsize=13, fontweight="bold", y=0.98,
+        "MINERVINI SEPA v3 — 15-YEAR BACKTEST (2010–2024)  |  Market Filter + Breakout Confirmation",
+        color="white", fontsize=12, fontweight="bold", y=0.98,
     )
     plt.savefig(cfg["chart_file"], dpi=150, bbox_inches="tight", facecolor=BG)
     print(f"📊 Chart saved → {cfg['chart_file']}")
@@ -624,7 +703,7 @@ def main():
         sys.exit(1)
 
     stats = compute_stats(trades_df, equity_df, spy_df, cfg)
-    print_report(stats, trades_df, cfg)
+    print_report(stats, trades_df, equity_df, cfg)
 
     trades_df.to_csv(cfg["trades_file"], index=False)
     print(f"📁 Trades CSV → {cfg['trades_file']}")
